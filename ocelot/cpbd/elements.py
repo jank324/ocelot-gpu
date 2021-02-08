@@ -5,6 +5,9 @@ linear dimensions in [m]
 
 from ocelot.cpbd.field_map import FieldMap
 import numpy as np
+import torch
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class Element(object):
@@ -596,9 +599,9 @@ class Multipole(Element):
 
     def __init__(self, kn=0., eid=None):
         Element.__init__(self, eid)
-        kn = np.array([kn]).flatten()
+        kn = torch.tensor([kn], dtype=torch.float, device=device).flatten()
         if len(kn) < 2:
-            self.kn = np.append(kn, [0.])
+            self.kn = torch.cat((self.kn,[0.]), 0)
         else:
             self.kn = kn
         self.n = len(self.kn)
@@ -626,10 +629,10 @@ class Matrix(Element):
         Element.__init__(self, eid)
         self.l = l
 
-        self.r = np.zeros((6, 6))
-        self.t = np.zeros((6, 6, 6))
+        self.r = torch.zeros(6, 6, dtype=torch.float, device=device)
+        self.t = torch.zeros(6, 6, 6, dtype=torch.float, device=device)
         # zero order elements - test mode, not implemented yet
-        self.b = np.zeros((6, 1))
+        self.b = torch.zeros(6, 1, dtype=torch.float, device=device)
 
         for y in kwargs:
             # decode first order arguments in format RXX or rXX where X is number from 1 to 6

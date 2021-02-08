@@ -10,24 +10,29 @@ from scipy.signal import savgol_filter
 from scipy.stats import truncnorm
 from ocelot.common.ocelog import *
 from ocelot.cpbd.reswake import pipe_wake
+import torch
 
 _logger = logging.getLogger(__name__)
 
-try:
-    import numexpr as ne
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    ne_flag = True
-except:
-    _logger.debug("beam.py: module NUMEXPR is not installed. Install it to speed up calculation")
-    ne_flag = False
+# try:
+#     import numexpr as ne
 
-try:
-    import numba as nb
+#     ne_flag = True
+# except:
+#     _logger.debug("beam.py: module NUMEXPR is not installed. Install it to speed up calculation")
+#     ne_flag = False
 
-    nb_flag = True
-except:
-    _logger.info("beam.py: module NUMBA is not installed. Install it to speed up calculation")
-    nb_flag = False
+# try:
+#     import numba as nb
+
+#     nb_flag = True
+# except:
+#     _logger.info("beam.py: module NUMBA is not installed. Install it to speed up calculation")
+#     nb_flag = False
+ne_flag = False
+nb_flag = False
 
 """
 Note:
@@ -842,7 +847,7 @@ def get_envelope(p_array, tws_i=Twiss(), bounds=None):
 
     tws = Twiss()
     tws.E = np.copy(p_array.E)
-    tws.q = np.sum(p_array.q_array)
+    tws.q = torch.sum(p_array.q_array)
 
     # if less than 3 particles are left in the ParticleArray - return default (zero) Twiss()
     if len(x) < 3:
@@ -865,12 +870,12 @@ def get_envelope(p_array, tws_i=Twiss(), bounds=None):
     else:
         px = px * (1. - 0.5 * px * px - 0.5 * py * py)
         py = py * (1. - 0.5 * px * px - 0.5 * py * py)
-    tws.x = np.mean(x)
-    tws.y = np.mean(y)
-    tws.px = np.mean(px)
-    tws.py = np.mean(py)
-    tws.tau = np.mean(tau)
-    tws.p = np.mean(p)
+    tws.x = torch.mean(x)
+    tws.y = torch.mean(y)
+    tws.px = torch.mean(px)
+    tws.py = torch.mean(py)
+    tws.tau = torch.mean(tau)
+    tws.p = torch.mean(p)
 
     if ne_flag:
         tw_x = tws.x
@@ -878,32 +883,32 @@ def get_envelope(p_array, tws_i=Twiss(), bounds=None):
         tw_px = tws.px
         tw_py = tws.py
         tw_tau = tws.tau
-        tws.xx = np.mean(ne.evaluate('(x - tw_x) * (x - tw_x)'))
-        tws.xpx = np.mean(ne.evaluate('(x - tw_x) * (px - tw_px)'))
-        tws.pxpx = np.mean(ne.evaluate('(px - tw_px) * (px - tw_px)'))
-        tws.yy = np.mean(ne.evaluate('(y - tw_y) * (y - tw_y)'))
-        tws.ypy = np.mean(ne.evaluate('(y - tw_y) * (py - tw_py)'))
-        tws.pypy = np.mean(ne.evaluate('(py - tw_py) * (py - tw_py)'))
-        tws.tautau = np.mean(ne.evaluate('(tau - tw_tau) * (tau - tw_tau)'))
+        tws.xx = torch.mean(ne.evaluate('(x - tw_x) * (x - tw_x)'))
+        tws.xpx = torch.mean(ne.evaluate('(x - tw_x) * (px - tw_px)'))
+        tws.pxpx = torch.mean(ne.evaluate('(px - tw_px) * (px - tw_px)'))
+        tws.yy = torch.mean(ne.evaluate('(y - tw_y) * (y - tw_y)'))
+        tws.ypy = torch.mean(ne.evaluate('(y - tw_y) * (py - tw_py)'))
+        tws.pypy = torch.mean(ne.evaluate('(py - tw_py) * (py - tw_py)'))
+        tws.tautau = torch.mean(ne.evaluate('(tau - tw_tau) * (tau - tw_tau)'))
 
-        tws.xy = np.mean(ne.evaluate('(x - tw_x) * (y - tw_y)'))
-        tws.pxpy = np.mean(ne.evaluate('(px - tw_px) * (py - tw_py)'))
-        tws.xpy = np.mean(ne.evaluate('(x - tw_x) * (py - tw_py)'))
-        tws.ypx = np.mean(ne.evaluate('(y - tw_y) * (px - tw_px)'))
+        tws.xy = torch.mean(ne.evaluate('(x - tw_x) * (y - tw_y)'))
+        tws.pxpy = torch.mean(ne.evaluate('(px - tw_px) * (py - tw_py)'))
+        tws.xpy = torch.mean(ne.evaluate('(x - tw_x) * (py - tw_py)'))
+        tws.ypx = torch.mean(ne.evaluate('(y - tw_y) * (px - tw_px)'))
 
     else:
-        tws.xx = np.mean((x - tws.x) * (x - tws.x))
-        tws.xpx = np.mean((x - tws.x) * (px - tws.px))
-        tws.pxpx = np.mean((px - tws.px) * (px - tws.px))
-        tws.yy = np.mean((y - tws.y) * (y - tws.y))
-        tws.ypy = np.mean((y - tws.y) * (py - tws.py))
-        tws.pypy = np.mean((py - tws.py) * (py - tws.py))
-        tws.tautau = np.mean((tau - tws.tau) * (tau - tws.tau))
+        tws.xx = torch.mean((x - tws.x) * (x - tws.x))
+        tws.xpx = torch.mean((x - tws.x) * (px - tws.px))
+        tws.pxpx = torch.mean((px - tws.px) * (px - tws.px))
+        tws.yy = torch.mean((y - tws.y) * (y - tws.y))
+        tws.ypy = torch.mean((y - tws.y) * (py - tws.py))
+        tws.pypy = torch.mean((py - tws.py) * (py - tws.py))
+        tws.tautau = torch.mean((tau - tws.tau) * (tau - tws.tau))
 
-        tws.xy = np.mean((x - tws.x) * (y - tws.y))
-        tws.pxpy = np.mean((px - tws.px) * (py - tws.py))
-        tws.xpy = np.mean((x - tws.x) * (py - tws.py))
-        tws.ypx = np.mean((y - tws.y) * (px - tws.px))
+        tws.xy = torch.mean((x - tws.x) * (y - tws.y))
+        tws.pxpy = torch.mean((px - tws.px) * (py - tws.py))
+        tws.xpy = torch.mean((x - tws.x) * (py - tws.py))
+        tws.ypx = torch.mean((y - tws.y) * (px - tws.px))
 
     Sigma = np.array([[tws.xx, tws.xy, tws.xpx, tws.xpy],
                       [tws.xy, tws.yy, tws.ypx, tws.ypy],

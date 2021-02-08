@@ -9,6 +9,9 @@ import os, sys
 from ocelot.adaptors.astra2ocelot import astraBeam2particleArray, particleArray2astraBeam
 from ocelot.adaptors.csrtrack2ocelot import csrtrackBeam2particleArray, particleArray2csrtrackBeam
 from ocelot.cpbd.beam import ParticleArray, Twiss, Beam
+import torch
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def save_particle_array2npz(filename, p_array):
@@ -27,7 +30,10 @@ def load_particle_array_from_npz(filename, print_params=False):
     p_array = ParticleArray()
     with np.load(filename) as data:
         for key in data.keys():
-            p_array.__dict__[key] = data[key]
+            if data[key].__class__ == np.ndarray:
+                p_array.__dict__[key] = torch.tensor(data[key], dtype=torch.float, device=device)
+            else:
+                p_array.__dict__[key] = data[key]
     return p_array
 
 

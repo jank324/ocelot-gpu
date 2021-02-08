@@ -6,15 +6,19 @@ from scipy import optimize
 from ocelot.common.globals import m_e_GeV, m_e_eV, speed_of_light
 from numpy.linalg import norm
 from ocelot.common.ocelog import *
+import torch
 
 _logger = logging.getLogger(__name__)
 
-try:
-    import numba as nb
-    nb_flag = True
-except:
-    _logger.info("high_order.py: module NUMBA is not installed. Install it to speed up calculation")
-    nb_flag = False
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# try:
+#     import numba as nb
+#     nb_flag = True
+# except:
+#     _logger.info("high_order.py: module NUMBA is not installed. Install it to speed up calculation")
+#     nb_flag = False
+nb_flag = False
     
 __MAD__ = True
 
@@ -320,7 +324,7 @@ def t_nnn_transport(L, h, k1, k2, energy=0):
     cy_1 = -ky2*sy
     sy_1 = cy
     dx_1 = h*sx
-    T = np.zeros((6, 6, 6))
+    T = torch.zeros(6, 6, 6, dtype=torch.float, device=device)
     T[0, 0, 0] = t111
     T[0, 0, 1] = t112 + h*sx
     T[0, 0, 5] = t116
@@ -519,7 +523,7 @@ def t_nnn_mad(L, h, k1, k2, energy=0):
     Jf = (f2y - fx) / J_denom if J_denom != 0 else L5 / 120
 
     khk = K2 + 2*h*K1
-    T = np.zeros((6,6,6))
+    T = torch.zeros(6, 6, 6, dtype=torch.float, device=device)
 
     T111 = -1/6*khk*(sx2 + dx) - 0.5*h*kx2*sx2
     T112 = -1/6*khk*sx*dx + 0.5*h*sx*cx
@@ -644,11 +648,11 @@ def fringe_ent(h, k1, e, h_pole=0., gap=0., fint=0.):
     tan_e = np.tan(e)
     tan_e2 = tan_e*tan_e
     phi = fint*h*gap*sec_e*(1. + np.sin(e)**2)
-    R = np.eye(6)
+    R = torch.eye(6, dtype=torch.float, device=device)
     R[1, 0] = h*tan_e
     R[3, 2] = -h*np.tan(e - phi)
 
-    T = np.zeros((6,6,6))
+    T = torch.zeros(6, 6, 6, dtype=torch.float, device=device)
     T[0, 0, 0] = -h/2.*tan_e2
     T[0, 2, 2] = h/2.*sec_e2
     T[1, 0, 0] = h/2.*h_pole*sec_e3 + k1*tan_e
@@ -691,12 +695,12 @@ def fringe_ext(h, k1, e, h_pole=0., gap=0., fint=0.):
     tan_e3 = tan_e2 * tan_e
     phi = fint*h*gap*sec_e*(1. + np.sin(e)**2)
     h2 = h*h
-    R = np.eye(6)
+    R = torch.eye(6, dtype=torch.float, device=device)
 
     R[1, 0] = h*tan_e
     R[3, 2] = -h*np.tan(e - phi)
 
-    T = np.zeros((6,6,6))
+    T = torch.zeros(6, 6, 6, dtype=torch.float, device=device)
     T[0, 0, 0] = h/2.*tan_e2
     T[0, 2, 2] = -h/2.*sec_e2
     T[1, 0, 0] = h/2.*h_pole*sec_e3 - (-k1 + h*h/2.*tan_e2)*tan_e
@@ -830,7 +834,7 @@ def sym_map(z, X, h, k1, k2, energy=0.):
     if gamma != 0.:
         g_inv = 1./gamma
         beta = np.sqrt(1. - g_inv*g_inv)
-    z_array = np.linspace(0., z, num=n)
+    z_array = torch.linspace(0., z, num=n, dtype=torch.float, device=device)
     step = z_array[1] - z_array[0]
 
     x =     X[0::6]
@@ -968,13 +972,13 @@ def rk_track_in_field(y0, s_stop, N, energy, mag_field, s_start=0.):
     """
 
     # pc_ref = np.sqrt(energy**2 - m_e_GeV**2)
-    z = np.linspace(s_start, s_stop, num=N)
+    z = torch.linspace(s_start, s_stop, num=N, dtype=torch.float, device=device)
     h = z[1] - z[0]
     N = len(z)
     gamma0 = energy/m_e_GeV
     charge = 1
     mass = 1 #in electron mass
-    u = np.zeros((N*9, np.shape(y0)[1]))
+    u = torch.zeros(N*9, np.shape(y0)[1], dtype=torch.float, device=device)
     dz = h
     beta0 = np.sqrt(1. - 1./(gamma0*gamma0))
     gammai = gamma0*(1 + y0[5]*beta0)
@@ -1058,11 +1062,11 @@ def rk_field(rparticles, s_start, s_stop, N, energy, mag_field, long_dynamics=Tr
     ref_path = 0
 
     if long_dynamics:
-        traj_ref = rk_track_in_field(np.array([[0], [0], [0], [0], [0], [0]]), s_stop, N, energy, mag_field, s_start=s_start)
+        traj_ref = rk_track_in_field(torch.tensor([[0], [0], [0], [0], [0], [0]], dtype=torch.float, device=device), s_stop, N, energy, mag_field, s_start=s_start)
         x1 = traj_ref[1+9::9]
         y1 = traj_ref[3+9::9]
         dz = traj_ref[4+9::9] - traj_ref[4:-9:9]
-        ref_path = np.sum(dz*np.sqrt(1 + x1*x1 + y1*y1))
+        ref_path = torch.sum(dz*np.sqrt(1 + x1*x1 + y1*y1))
 
     traj_data = rk_track_in_field(rparticles, s_stop, N, energy, mag_field, s_start=s_start)
 
@@ -1072,7 +1076,7 @@ def rk_field(rparticles, s_start, s_stop, N, energy, mag_field, long_dynamics=Tr
         x1 = traj_data[1+9::9, :]
         y1 = traj_data[3+9::9, :]
         dz = traj_data[4+9::9, :] - traj_data[4:-9:9, :]
-        z_fin += traj_data[4, :] + np.sum(dz*np.sqrt(1 + x1*x1 + y1*y1), axis=0) - ref_path
+        z_fin += traj_data[4, :] + torch.sum(dz*np.sqrt(1 + x1*x1 + y1*y1), axis=0) - ref_path
 
     rparticles[0, :] = traj_data[(N-1)*9 + 0, :]
     rparticles[1, :] = traj_data[(N-1)*9 + 1, :]
@@ -1084,7 +1088,7 @@ def rk_field(rparticles, s_start, s_stop, N, energy, mag_field, long_dynamics=Tr
 
 
 def scipy_track_in_field(y0, l, N, energy, mag_field):# y0, l, N, energy, mag_field
-    z = np.linspace(0.,l, num=N)
+    z = torch.linspace(0.,l, num=N, dtype=torch.float, device=device)
     def func(y, z, fields):
         gamma = energy/m_e_GeV
         charge = 1
@@ -1107,7 +1111,7 @@ def scipy_track_in_field(y0, l, N, energy, mag_field):# y0, l, N, energy, mag_fi
         mx = k*(by*Bz - By*(1.+bx2) + bxy*Bx)
         my = -k*(bx*Bz - Bx*(1.+by2) + bxy*By)
         y = np.append(bx, (mx, by, my))
-        return np.array(y) #[y[1],mx, y[3], my]
+        return torch.tensor(y, dtype=torch.float, device=device) #[y[1],mx, y[3], my]
 
     n = len(y0)/6
     x = y0[0::6]
@@ -1118,17 +1122,17 @@ def scipy_track_in_field(y0, l, N, energy, mag_field):# y0, l, N, energy, mag_fi
 
     u = odeint(func, Y0, z, args = (mag_field,), rtol=1e-10, atol=1e-10)
 
-    w = np.zeros((6*len(z), n))
+    w = torch.zeros(6*len(z), n, dtype=torch.float, device=device)
     w[0::6] = u[:, 0:n]
     w[1::6] = u[:, n:2*n]
     w[2::6] = u[:, 2*n:3*n]
     w[3::6] = u[:, 3*n:4*n]
     N = len(z)
     sub = y0[4::6]
-    sub = np.tile(sub, N).reshape((N, n))
+    sub = torch.tensor(np.tile(sub, N).reshape((N, n)), dtype=torch.float, device=device)
     w[4::6] = sub[:]
     sub = y0[5::6]
-    sub = np.tile(sub, N).reshape((N, n))
+    sub = torch.tensor(np.tile(sub, N).reshape((N, n)), dtype=torch.float, device=device)
     w[5::6] = sub[:]
     return w
 
@@ -1167,10 +1171,10 @@ def track_und_weave(y0, z, kz, kx ,Kx, energy):
     N = len(z)
     #Ax =  1/kz * np.cos(kx*y0[0])*np.cosh(ky*y0[2])*np.sin(kz*z[0])
     #Ay =  kx/(ky*kz) * np.sin(kx*y0[0])*np.sinh(ky*y0[2])*np.sin(kz*z[0])
-    q = np.array([y0[0],y0[1] ,y0[2],y0[3], y0[4], y0[5], kx, ky, kz, h, N, B0, gamma*(1+y0[5])])
+    q = torch.tensor([y0[0],y0[1] ,y0[2],y0[3], y0[4], y0[5], kx, ky, kz, h, N, B0, gamma*(1+y0[5])], dtype=torch.float, device=device)
     #print N
 
-    u = np.zeros(N*6)
+    u = torch.zeros(N*6, dtype=torch.float, device=device)
     support_code = """
     extern "C" {
     void fields(double x, double y, double z, double kx, double ky, double kz, double B0, double *Bx, double *By, double *Bz)
@@ -1330,12 +1334,12 @@ def track_und_weave_openmp(u, l, N, kz, kx ,Kx, energy):
     B0 = Kx*m0*kz/c
 
     ky = np.sqrt(kz*kz - kx*kx)
-    z = np.linspace(0, l, num=N)
+    z = torch.linspace(0, l, num=N, dtype=torch.float, device=device)
     h = z[1]-z[0]
     N = len(z)
 
     nparticles = len(u)/6
-    q = np.array([ kx, ky, kz, h, N, B0, gamma, nparticles])
+    q = torch.tensor([ kx, ky, kz, h, N, B0, gamma, nparticles], dtype=torch.float, device=device)
     code = """
     double charge = 1;
     double mass = 1; //in electron mass
@@ -1511,7 +1515,7 @@ def arcline( SREin, Delta_S, dS, R_vect ):
     sre0 = SREin[:, -1]
     N = int(max(1, np.round(Delta_S/dS)))
     dS = float(Delta_S)/N
-    SRE2 = np.zeros((7, N))
+    SRE2 = torch.tensor(7, N, dtype=torch.float, device=device)
     SRE2[0,:] = sre0[0] + np.arange(1, N+1)*dS
 
     R_vect_valid = False
@@ -1536,9 +1540,9 @@ def arcline( SREin, Delta_S, dS, R_vect ):
     else:
         R = norm(R_vect)
         n_vect = R_vect/R
-        e2 = np.array([[n_vect[1]*e1[2] - n_vect[2]*e1[1]],
-            [n_vect[2]*e1[0] - n_vect[0]*e1[2]],
-            [n_vect[0]*e1[1] - n_vect[1]*e1[0]]])
+        e2 = torch.tensor([[n_vect[1]*e1[2] - n_vect[2]*e1[1]],
+                           [n_vect[2]*e1[0] - n_vect[0]*e1[2]],
+                           [n_vect[0]*e1[1] - n_vect[1]*e1[0]]], dtype=torch.float, device=device)
         si = np.sin(np.arange(1, N+1)*dS/R)
         co = np.cos(np.arange(1, N+1)*dS/R)
         omco = 2*np.sin(np.arange(1, N+1)*dS/R/2)**2

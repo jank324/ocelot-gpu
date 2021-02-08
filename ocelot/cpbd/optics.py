@@ -9,16 +9,20 @@ from ocelot.cpbd.r_matrix import *
 from copy import deepcopy
 import logging
 import numpy as np
+import torch
 
 _logger = logging.getLogger(__name__)
 _logger_navi = logging.getLogger(__name__ + ".navi")
 
-try:
-    import numba as nb
-    nb_flag = True
-except ImportError as error:
-    _logger.debug(" optics.py: module NUMBA is not installed. Install it to speed up calculation")
-    nb_flag = False
+# try:
+#     import numba as nb
+#     nb_flag = True
+# except ImportError as error:
+#     _logger.debug(" optics.py: module NUMBA is not installed. Install it to speed up calculation")
+#     nb_flag = False
+nb_flag = False
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 class SecondOrderMult:
@@ -58,20 +62,20 @@ class SecondOrderMult:
                 X[i, n] = x_new
 
     def numpy_apply(self, X, R, T):
-        X[:] = np.matmul(R, X) + np.einsum('ijk,j...,k...->i...', T, X, X)
+        X[:] = torch.matmul(R, X) + torch.einsum('ijk,j...,k...->i...', T, X, X)
 
 
 def transform_vec_ent(X, dx, dy, tilt):
     rotmat = rot_mtx(tilt)
-    x_add = np.add(X, np.array([[-dx], [0.], [-dy], [0.], [0.], [0.]]))
-    X[:] = np.dot(rotmat, x_add)[:]
+    x_add = torch.add(X, torch.tensor([[-dx], [0.], [-dy], [0.], [0.], [0.]], dtype=torch.float, device=device))
+    X[:] = torch.dot(rotmat, x_add)[:]
     return X
 
 
 def transform_vec_ext(X, dx, dy, tilt):
     rotmat = rot_mtx(-tilt)
-    x_tilt = np.dot(rotmat, X)
-    X[:] = np.add(x_tilt, np.array([[dx], [0.], [dy], [0.], [0.], [0.]]))[:]
+    x_tilt = torch.dot(rotmat, X)
+    X[:] = torch.add(x_tilt, torch.tensor([[dx], [0.], [dy], [0.], [0.], [0.]], dtype=torch.float, device=device))[:]
     return X
 
 
@@ -124,9 +128,9 @@ class TransferMap:
         self.delta_e = 0.0
         self.delta_e_z = lambda z: 0.0
         # 6x6 linear transfer matrix
-        self.R = lambda energy: np.eye(6)
-        self.R_z = lambda z, energy: np.zeros((6, 6))
-        self.B_z = lambda z, energy: np.dot((np.eye(6) - self.R_z(z, energy)), np.array([[self.dx], [0.], [self.dy], [0.], [0.], [0.]]))
+        self.R = lambda energy: torch.eye(6, dtype=torch.float, device=device)
+        self.R_z = lambda z, energy: torch.zeros(6, 6, dtype=torch.float, device=device)
+        self.B_z = lambda z, energy: torch.dot((torch.eye(6, dtype=torch.float, device=device) - self.R_z(z, energy)), torch.tensor([[self.dx], [0.], [self.dy], [0.], [0.], [0.]], dtype=torch.float, device=device))
         self.B = lambda energy: self.B_z(self.length, energy)
         self.map = lambda u, energy: self.mul_p_array(u, energy=energy)
 
@@ -190,7 +194,7 @@ class TransferMap:
         return tws
 
     def mul_p_array(self, rparticles, energy=0.):
-        a = np.add(np.dot(self.R(energy), rparticles), self.B(energy))
+        a = torch.add(torch.dot(self.R(energy), rparticles), self.B(energy))
         rparticles[:] = a[:]
         return rparticles
 
@@ -206,8 +210,8 @@ class TransferMap:
 
         if m.__class__ in [TransferMap]:
             m2 = TransferMap()
-            m2.R = lambda energy: np.dot(self.R(energy), m.R(energy))
-            m2.B = lambda energy: np.dot(self.R(energy), m.B(energy)) + self.B(energy)
+            m2.R = lambda energy: torch.dot(self.R(energy), m.R(energy))
+            m2.B = lambda energy: torch.dot(self.R(energy), m.B(energy)) + self.B(energy)
             m2.length = m.length + self.length
 
             return m2
@@ -241,17 +245,17 @@ class TransferMap:
 
         elif prcl_series.__class__ == Particle:
             p = prcl_series
-            p.x, p.px, p.y, p.py, p.tau, p.p = self.map(np.array([[p.x], [p.px], [p.y], [p.py], [p.tau], [p.p]]), p.E)[:,0]
+            p.x, p.px, p.y, p.py, p.tau, p.p = self.map(torch.tensor([[p.x], [p.px], [p.y], [p.py], [p.tau], [p.p]], dtype=torch.float, device=device), p.E)[:,0]
             p.s += self.length
             p.E += self.delta_e
 
         elif prcl_series.__class__ == list and prcl_series[0].__class__ == Particle:
             # If the energy is not the same (p.E) for all Particles in the list of Particles
             # in that case cycle is applied. For particles with the same energy p.E
-            list_e = np.array([p.E for p in prcl_series])
+            list_e = torch.tensor([p.E for p in prcl_series], dtype=torch.float, device=device)
             if False in (list_e[:] == list_e[0]):
                 for p in prcl_series:
-                    self.map(np.array([[p.x], [p.px], [p.y], [p.py], [p.tau], [p.p]]), energy=p.E)
+                    self.map(torch.torch([[p.x], [p.px], [p.y], [p.py], [p.tau], [p.p]], dtype=torch.float, device=device), energy=p.E)
                     p.E += self.delta_e
                     p.s += self.length
             else:
@@ -287,7 +291,7 @@ class SecondTM(TransferMap):
         self.map = lambda X, energy: self.t_apply(self.r_z_no_tilt(self.length, energy),
                                                   self.t_mat_z_e(self.length, energy), X, self.dx, self.dy, self.tilt)
 
-        self.R_tilt = lambda energy: np.dot(np.dot(rot_mtx(-self.tilt), self.r_z_no_tilt(self.length, energy)), rot_mtx(self.tilt))
+        self.R_tilt = lambda energy: torch.dot(torch.dot(rot_mtx(-self.tilt), self.r_z_no_tilt(self.length, energy)), rot_mtx(self.tilt))
 
         self.T_tilt = lambda energy: transfer_map_rotation(self.r_z_no_tilt(self.length, energy),
                                                              self.t_mat_z_e(self.length, energy), self.tilt)[1]
@@ -332,7 +336,7 @@ class CorrectorTM(SecondTM):
         dy = hy * z * z / 2.
         dx1 = hx * z if l != 0 else angle_x
         dy1 = hy * z if l != 0 else angle_y
-        b = np.array([[dx], [dx1], [dy], [dy1], [0.], [0.]])
+        b = torch.tensor([[dx], [dx1], [dy], [dy1], [0.], [0.]], dtype=torch.float, device=device)
         return b
 
     def kick(self, X, z, l, angle_x, angle_y, energy):
@@ -371,9 +375,9 @@ class PulseTM(TransferMap):
         dxp = self.pulse.kick_x(tau)
         dyp = self.pulse.kick_y(tau)
         _logger.debug('kick ' + str(dxp) + ' ' + str(dyp))
-        b = np.array([0.0, dxp, 0.0, dyp, 0., 0.])
+        b = torch.tensor([0.0, dxp, 0.0, dyp, 0., 0.], dtype=torch.float, device=device)
         #a = np.add(np.transpose(dot(self.R(energy), np.transpose(particles.reshape(int(n / 6), 6)))), b).reshape(n)
-        a = np.add(np.dot(self.R(energy), rparticles), b)
+        a = torch.add(torch.dot(self.R(energy), rparticles), b)
         rparticles[:] = a[:]
         _logger.debug('return trajectory, array ' + str(len(rparticles)))
         return rparticles
@@ -482,14 +486,14 @@ class CouplerKickTM(TransferMap):
         phi = phi * np.pi / 180.
         dxp = (self.vx * v * np.exp(1j * phi)).real / energy
         dyp = (self.vy * v * np.exp(1j * phi)).real / energy
-        b = np.array([[0.], [dxp], [0.], [dyp], [0.], [0.]])
+        b = torch.tensor([[0.], [dxp], [0.], [dyp], [0.], [0.]], dtype=torch.float, device=device)
         return b
 
     def kick(self, X, v, phi, energy):
         _logger.debug('invoking coupler kick zero order')
         b = self.kick_b(v, phi, energy)
-        X1 = np.dot(self.R(energy), X)
-        X1 = np.add(X1, b)
+        X1 = torch.tensor(np.dot(self.R(energy), X), dtype=torch.float, device=device)
+        X1 = torch.add(X1, b)
         X[:] = X1[:]
         return X
 
@@ -662,11 +666,11 @@ class TWCavityTM(TransferMap):
         self.freq = freq
         self.delta_e_z = lambda z: self.v * np.cos(self.phi * np.pi / 180.) * z / self.length
         self.delta_e = self.v * np.cos(self.phi * np.pi / 180.)
-        self.R_z = lambda z, energy: np.dot(
+        self.R_z = lambda z, energy: torch.dot(
             self.tw_cavity_R_z(z, self.v * z / self.length, energy, self.freq, self.phi),
             self.f_entrance(z, self.v * z / self.length, energy, self.phi))
-        self.R = lambda energy: np.dot(self.f_exit(self.length, self.v, energy, self.phi),
-                                       self.R_z(self.length, energy))
+        self.R = lambda energy: torch.dot(self.f_exit(self.length, self.v, energy, self.phi),
+                                          self.R_z(self.length, energy))
 
     def tw_cavity_R_z(self, z, V, E, freq, phi=0.):
         """
@@ -682,12 +686,12 @@ class TWCavityTM(TransferMap):
         r22 = E / (E + de)
         r65 = V * np.sin(phi) / (E + de) * (2 * np.pi / (speed_of_light / freq)) if freq != 0 else 0
         r66 = r22
-        cav_matrix = np.array([[1, r12, 0., 0., 0., 0.],
-                               [0, r22, 0., 0., 0., 0.],
-                               [0., 0., 1, r12, 0., 0.],
-                               [0., 0., 0, r22, 0., 0.],
-                               [0., 0., 0., 0., 1., 0],
-                               [0., 0., 0., 0., r65, r66]]).real
+        cav_matrix = torch.tensor([[1, r12, 0., 0., 0., 0.],
+                                   [0, r22, 0., 0., 0., 0.],
+                                   [0., 0., 1, r12, 0., 0.],
+                                   [0., 0., 0, r22, 0., 0.],
+                                   [0., 0., 0., 0., 1., 0],
+                                   [0., 0., 0., 0., r65, r66]], dtype=torch.cfloat, device=device).real
         return cav_matrix
 
     def f_entrance(self, z, V, E, phi=0.):
@@ -854,7 +858,7 @@ class MethodTM:
         tm.dx = dx
         tm.dy = dy
         tm.tilt = tilt
-        tm.R_z = lambda z, energy: np.dot(np.dot(rot_mtx(-tilt), r_z_e(z, energy)), rot_mtx(tilt))
+        tm.R_z = lambda z, energy: torch.tensor(np.dot(np.dot(rot_mtx(-tilt), r_z_e(z, energy)), rot_mtx(tilt)), dtype=torch.float, device=device)
         tm.R = lambda energy: tm.R_z(element.l, energy)
         # tm.B_z = lambda z, energy: dot((eye(6) - tm.R_z(z, energy)), array([dx, 0., dy, 0., 0., 0.]))
         # tm.B = lambda energy: tm.B_z(element.l, energy)
@@ -897,21 +901,21 @@ def lattice_transfer_map(lattice, energy):
     :return: R - matrix
     """
 
-    Ra = np.eye(6)
-    Ta = np.zeros((6, 6, 6))
-    Ba = np.zeros((6, 1))
+    Ra = torch.eye(6, dtype=torch.float, device=device)
+    Ta = torch.zeros(6, 6, 6, dtype=torch.float, device=device)
+    Ba = torch.zeros(6, 1, dtype=torch.float, device=device)
     E = energy
     for i, elem in enumerate(lattice.sequence):
         Rb = elem.transfer_map.R(E)
         Bb = elem.transfer_map.B(E)
 
         if isinstance(elem.transfer_map, SecondTM):  # elem.transfer_map.__class__ == SecondTM:
-            Tb = np.copy(elem.transfer_map.T_tilt(E))
+            Tb = torch.copy(elem.transfer_map.T_tilt(E))
             Tb = sym_matrix(Tb)
             Ra, Ta = transfer_maps_mult(Ra, Ta, Rb, Tb)
         else:
             Ra, Ta = transfer_maps_mult(Ra, Ta, Rb, Tb=np.zeros((6, 6, 6)))
-        Ba = np.dot(Rb, Ba) + Bb
+        Ba = torch.dot(Rb, Ba) + Bb
         E += elem.transfer_map.delta_e
     lattice.E = E
     lattice.T_sym = Ta
@@ -988,14 +992,14 @@ def periodic_twiss(tws, R):
     tws.alpha_y = (R[2, 2] - R[3, 3]) / (2 * sinmy)  # Y[0,0]
     tws.gamma_y = (1. + tws.alpha_y * tws.alpha_y) / tws.beta_y  # Y[1,0]
 
-    Hx = np.array([[R[0, 0] - 1, R[0, 1]], [R[1, 0], R[1, 1] - 1]])
-    Hhx = np.array([[R[0, 5]], [R[1, 5]]])
-    hh = np.dot(inv(-Hx), Hhx)
+    Hx = torch.tensor([[R[0, 0] - 1, R[0, 1]], [R[1, 0], R[1, 1] - 1]], dtype=torch.float, device=device)
+    Hhx = torch.tensor([[R[0, 5]], [R[1, 5]]], dtype=torch.float, device=device)
+    hh = torch.dot(inv(-Hx), Hhx)
     tws.Dx = hh[0, 0]
     tws.Dxp = hh[1, 0]
-    Hy = np.array([[R[2, 2] - 1, R[2, 3]], [R[3, 2], R[3, 3] - 1]])
-    Hhy = np.array([[R[2, 5]], [R[3, 5]]])
-    hhy = np.dot(inv(-Hy), Hhy)
+    Hy = torch.tensor([[R[2, 2] - 1, R[2, 3]], [R[3, 2], R[3, 3] - 1]], dtype=torch.float, device=device)
+    Hhy = torch.tensor([[R[2, 5]], [R[3, 5]]], dtype=torch.float, device=device)
+    hhy = torch.dot(inv(-Hy), Hhy)
     tws.Dy = hhy[0, 0]
     tws.Dyp = hhy[1, 0]
     return tws

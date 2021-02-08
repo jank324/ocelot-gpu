@@ -7,13 +7,19 @@ from scipy.special import gammaincc, gamma, exp1
 from scipy import fftpack, integrate, interpolate
 from scipy import optimize
 import sys
+import torch
+from torch._C import dtype
 
-try:
-    import numba as nb
-    numba_avail = True
-except ImportError:
-    print("math_op.py: module Numba is not installed. Install it if you want speed up correlation calculations")
-    numba_avail = False
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+# try:
+#     import numba as nb
+#     numba_avail = True
+# except ImportError:
+#     print("math_op.py: module Numba is not installed. Install it if you want speed up correlation calculations")
+#     numba_avail = False
+numba_avail = False
+
 
 def complete_gamma(a, z):
     """
@@ -32,7 +38,7 @@ def conj_sym(x):
     >> numpy.fft.ifft(conj_sym(x))
 
     """
-    x = np.array(x, dtype=np.complex)
+    x = torch.tensor(x, dtype=torch.cfloat, device=device)
     n = len(x)
 
     c = 0 if n % 2 == 1 else 1
@@ -165,9 +171,9 @@ def peaks(x, y, n=0):
         f2.append(v)
             
     if n > 0:
-        return np.array(f1[0:n]), np.array(f2[0:n])
+        return torch.tensor(f1[0:n], dtype=torch.float, device=device), torch.tensor(f2[0:n], dtype=torch.float, device=device)
     else:
-        return np.array(f1), np.array(f2)
+        return torch.tensor(f1, dtype=torch.float, device=device), torch.tensor(f2, dtype=torch.float, device=device)
 
 
 def gs_search(f, bracket, tol=1.e-6, nmax=50):
@@ -202,7 +208,7 @@ def gs_search(f, bracket, tol=1.e-6, nmax=50):
         n += 1
         cur_tol = c-a
     
-    return np.array([a,b,c]), cur_tol
+    return torch.tensor([a,b,c], dtype=torch.float, device=device), cur_tol
 
 def fit_gauss_2d(x,y,F):
     
@@ -334,23 +340,23 @@ def fwhm3(valuelist, height=0.5, peakpos=-1, total=1):
             width = p2interp - p1interp
         # print(p1interp, p2interp)
             
-    return (peakpos, width, np.array([ind1, ind2]))
+    return (peakpos, width, torch.tensor([ind1, ind2], dtype=torch.float, device=device))
 
 def stats(outputs):
     
     ''' return mean, std, median and extreme (farthest from mean) of a time series '''
     
-    omean = np.zeros_like(outputs[0])
+    omean = torch.zeros_like(outputs[0], dtype=torch.float, device=device)
 
     for o in outputs:
-        omean += np.array(o)
+        omean += torch.tensor(o, dtype=torch.float, device=device)
     omean = omean / len(outputs)
         
     difm = np.linalg.norm(omean, 2)
     difw = 0.0
     imed = 0
     iworst = 0
-    std = np.zeros_like(outputs[0])
+    std = torch.zeros_like(outputs[0], dtype=torch.float, device=device)
     
     for i in np.arange( len(outputs) ):
         
@@ -364,7 +370,7 @@ def stats(outputs):
             iworst = i
             difw = difn
             
-        std += (omean - np.array(outputs[i]))**2
+        std += (omean - torch.tensor(outputs[i], dtype=torch.float, device=device))**2
                 
     std = np.sqrt(std / len(outputs)) 
          
@@ -435,7 +441,7 @@ def bin_array(array,bin_size):
 
 def bin_scale(scale,bin_size):
     if bin_size > len(scale):
-        return np.array([0])
+        return torch.tensor([0], dtype=torch.float, device=device)
     elif bin_size == 1:
         return scale
     else:
@@ -504,7 +510,7 @@ corr_f_nb = nb.jit('void(double[:,:], double[:,:], int32, int32)', nopython=True
              
 def correlation2d(val, norm=0, n_skip=1, use_numba=numba_avail):
     N = int(val.shape[0] / n_skip)
-    corr = np.zeros([N,N])
+    corr = torch.zeros(N, N, dtype=torch.float, device=device)
     if use_numba:
         corr_f_nb(corr, val, n_skip, norm)
     else:        

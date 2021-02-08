@@ -3,19 +3,22 @@ __author__ = 'Sergey Tomin'
 import logging
 from ocelot.common.globals import m_e_GeV, speed_of_light
 from ocelot.cpbd.elements import *
+import torch
 
 logger = logging.getLogger(__name__)
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 def rot_mtx(angle):
     cs = np.cos(angle)
     sn = np.sin(angle)
-    return np.array([[cs, 0., sn, 0., 0., 0.],
-                     [0., cs, 0., sn, 0., 0.],
-                     [-sn, 0., cs, 0., 0., 0.],
-                     [0., -sn, 0., cs, 0., 0.],
-                     [0., 0., 0., 0., 1., 0.],
-                     [0., 0., 0., 0., 0., 1.]])
+    return torch.tensor([[cs, 0., sn, 0., 0., 0.],
+                         [0., cs, 0., sn, 0., 0.],
+                         [-sn, 0., cs, 0., 0., 0.],
+                         [0., -sn, 0., cs, 0., 0.],
+                         [0., 0., 0., 0., 1., 0.],
+                         [0., 0., 0., 0., 0., 1.]], dtype=torch.float, device=device)
 
 
 def uni_matrix(z, k1, hx, sum_tilts=0., energy=0.):
@@ -60,14 +63,14 @@ def uni_matrix(z, k1, hx, sum_tilts=0., energy=0.):
 
     r56 -= z / (beta * beta) * igamma2
 
-    u_matrix = np.array([[cx, sx, 0., 0., 0., dx / beta],
-                         [-kx2 * sx, cx, 0., 0., 0., sx * hx / beta],
-                         [0., 0., cy, sy, 0., 0.],
-                         [0., 0., -ky2 * sy, cy, 0., 0.],
-                         [hx * sx / beta, dx / beta, 0., 0., 1., r56],
-                         [0., 0., 0., 0., 0., 1.]])
+    u_matrix = torch.tensor([[cx, sx, 0., 0., 0., dx / beta],
+                             [-kx2 * sx, cx, 0., 0., 0., sx * hx / beta],
+                             [0., 0., cy, sy, 0., 0.],
+                             [0., 0., -ky2 * sy, cy, 0., 0.],
+                             [hx * sx / beta, dx / beta, 0., 0., 1., r56],
+                             [0., 0., 0., 0., 0., 1.]], dtype=torch.float, device=device)
     if sum_tilts != 0:
-        u_matrix = np.dot(np.dot(rot_mtx(-sum_tilts), u_matrix), rot_mtx(sum_tilts))
+        u_matrix = torch.dot(torch.dot(rot_mtx(-sum_tilts), u_matrix), rot_mtx(sum_tilts))
     return u_matrix
 
 
@@ -84,7 +87,7 @@ def create_r_matrix(element):
         sec_e = 1. / np.cos(element.edge)
         phi = element.fint * element.h * element.gap * sec_e * (1. + np.sin(element.edge) ** 2)
         # phi = element.fint * element.h * element.gap * sec_e * (1. + np.sin(2*element.edge) )
-        r = np.eye(6)
+        r = torch.eye(6, dtype=torch.float, device=device)
         r[1, 0] = element.h * np.tan(element.edge)
         r[3, 2] = -element.h * np.tan(element.edge - phi)
         r_z_e = lambda z, energy: r
@@ -101,7 +104,7 @@ def create_r_matrix(element):
 
         def undulator_r_z(z, lperiod, Kx, Ky, energy):
             gamma = energy / m_e_GeV
-            r = np.eye(6)
+            r = torch.eye(6, dtype=torch.float, device=device)
             r[0, 1] = z
             if gamma != 0 and lperiod != 0 and Kx != 0:
                 beta = 1 / np.sqrt(1.0 - 1.0 / (gamma * gamma))
@@ -181,12 +184,12 @@ def create_r_matrix(element):
 
             r66 = Ei / Ef * beta0 / beta1
             r65 = k * np.sin(phi) * V / (Ef * beta1 * m_e_GeV)
-            cav_matrix = np.array([[r11, r12, 0., 0., 0., 0.],
-                                   [r21, r22, 0., 0., 0., 0.],
-                                   [0., 0., r11, r12, 0., 0.],
-                                   [0., 0., r21, r22, 0., 0.],
-                                   [0., 0., 0., 0., 1. + r55_cor, r56],
-                                   [0., 0., 0., 0., r65, r66]]).real
+            cav_matrix = torch.tensor([[r11, r12, 0., 0., 0., 0.],
+                                       [r21, r22, 0., 0., 0., 0.],
+                                       [0., 0., r11, r12, 0., 0.],
+                                       [0., 0., r21, r22, 0., 0.],
+                                       [0., 0., 0., 0., 1. + r55_cor, r56],
+                                       [0., 0., 0., 0., r65, r66]], dtype=torch.cfloat, device=device).real
 
             return cav_matrix
 
@@ -214,12 +217,12 @@ def create_r_matrix(element):
             m43 = - m21
             m23 = (vxy * v * np.exp(1j * phi)).real / energy
 
-            coupl_kick = np.array([[1, 0., 0., 0., 0., 0.],
-                                    [m21, 1, m23, 0., 0., 0.],
-                                    [0., 0., 1, 0., 0., 0.],
-                                    [m23, 0., m43, 1, 0., 0.],
-                                    [0., 0., 0., 0., 1., 0.],
-                                    [0., 0., 0., 0., 0., 1]])
+            coupl_kick = torch.tensor([[1, 0., 0., 0., 0., 0.],
+                                       [m21, 1, m23, 0., 0., 0.],
+                                       [0., 0., 1, 0., 0., 0.],
+                                       [m23, 0., m43, 1, 0., 0.],
+                                       [0., 0., 0., 0., 1., 0.],
+                                       [0., 0., 0., 0., 0., 1]], dtype=torch.float, device=device)
             return coupl_kick
 
         r_z_e = lambda z, energy: ck_matrix(v=element.v, phi=element.phi,
@@ -241,18 +244,18 @@ def create_r_matrix(element):
             r22 = E / (E + de)
             r65 = V * np.sin(phi) / (E + de) * (2 * np.pi / (speed_of_light / freq)) if freq != 0 else 0
             r66 = r22
-            cav_matrix = np.array([[1, r12, 0., 0., 0., 0.],
-                                   [0, r22, 0., 0., 0., 0.],
-                                   [0., 0., 1, r12, 0., 0.],
-                                   [0., 0., 0, r22, 0., 0.],
-                                   [0., 0., 0., 0., 1., 0],
-                                   [0., 0., 0., 0., r65, r66]]).real
+            cav_matrix = torch.tensor([[1, r12, 0., 0., 0., 0.],
+                                       [0, r22, 0., 0., 0., 0.],
+                                       [0., 0., 1, r12, 0., 0.],
+                                       [0., 0., 0, r22, 0., 0.],
+                                       [0., 0., 0., 0., 1., 0],
+                                       [0., 0., 0., 0., r65, r66]], dtype=torch.cfloat, device=device).real
             return cav_matrix
 
         def f_entrance(z, V, E, phi=0.):
             phi = phi * np.pi / 180.
             de = V * np.cos(phi)
-            r = np.eye(6)
+            r = torch.eye(6, dtype=torch.float, device=device)
             r[1, 0] = -de / z / 2. / E
             r[3, 2] = r[1, 0]
             return r
@@ -260,14 +263,14 @@ def create_r_matrix(element):
         def f_exit(z, V, E, phi=0.):
             phi = phi * np.pi / 180.
             de = V * np.cos(phi)
-            r = np.eye(6)
+            r = torch.eye(6, dtype=torch.float, device=device)
             r[1, 0] = +de / z / 2. / (E + de)
             r[3, 2] = r[1, 0]
             return r
 
         def cav(z, V, E, freq, phi):
-            R_z = np.dot(tw_cavity_R_z(z, V, E, freq, phi), f_entrance(z, V, E, phi))
-            R = np.dot(f_exit(z, V, E, phi), R_z)
+            R_z = torch.dot(tw_cavity_R_z(z, V, E, freq, phi), f_entrance(z, V, E, phi))
+            R = torch.dot(f_exit(z, V, E, phi), R_z)
             return R
 
         if element.v == 0.:
@@ -296,12 +299,12 @@ def create_r_matrix(element):
                 gamma2 = gamma * gamma
                 beta = np.sqrt(1. - 1. / gamma2)
                 r56 -= l / (beta * beta * gamma2)
-            sol_matrix = np.array([[c * c, c * s_k, s * c, s * s_k, 0., 0.],
-                                   [-k * s * c, c * c, -k * s * s, s * c, 0., 0.],
-                                   [-s * c, -s * s_k, c * c, c * s_k, 0., 0.],
-                                   [k * s * s, -s * c, -k * s * c, c * c, 0., 0.],
-                                   [0., 0., 0., 0., 1., r56],
-                                   [0., 0., 0., 0., 0., 1.]]).real
+            sol_matrix = torch.tensor([[c * c, c * s_k, s * c, s * s_k, 0., 0.],
+                                       [-k * s * c, c * c, -k * s * s, s * c, 0., 0.],
+                                       [-s * c, -s * s_k, c * c, c * s_k, 0., 0.],
+                                       [k * s * s, -s * c, -k * s * c, c * c, 0., 0.],
+                                       [0., 0., 0., 0., 1., r56],
+                                       [0., 0., 0., 0., 0., 1.]], dtype=torch.cfloat, device=device).real
             return sol_matrix
 
         r_z_e = lambda z, energy: sol(z, k=element.k, energy=energy)
@@ -336,7 +339,7 @@ def create_r_matrix(element):
             cos_phi = np.cos(phi)
             cos2_phi = np.cos(2 * phi)
 
-            rm = np.eye(6)
+            rm = torch.eye(6, dtype=torch.float, device=device)
 
             rm[0, 1] = z
             rm[0, 4] = -z * K * cos_phi / 2.
@@ -351,7 +354,7 @@ def create_r_matrix(element):
         r_z_e = lambda z, energy: tds_R_z(z, energy, freq=element.freq, v=element.v * z / element.l, phi=element.phi)
 
     elif element.__class__ == Matrix:
-        rm = np.eye(6)
+        rm = torch.eye(6, dtype=torch.float, device=device)
         rm = element.r
 
         def r_matrix(z, l, rm):
@@ -364,7 +367,7 @@ def create_r_matrix(element):
         r_z_e = lambda z, energy: r_matrix(z, element.l, rm)
 
     elif element.__class__ == Multipole:
-        r = np.eye(6)
+        r = torch.eye(6, dtype=torch.float, device=device)
         r[1, 0] = -element.kn[1]
         r[3, 2] = element.kn[1]
         r[1, 5] = element.kn[0]
@@ -413,14 +416,14 @@ def create_r_matrix(element):
 
             r56 -= z / (beta * beta) * igamma2
 
-            u_matrix = np.array([[cx, sx, 0., 0., 0., dx / beta],
-                                 [-kx2 * sx, cx, 0., 0., 0., sx * hx / beta],
-                                 [0., 0., cy, sy, 0., dy / beta],
-                                 [0., 0., -ky2 * sy, cy, 0., sy * hy / beta],
-                                 [hx * sx / beta, dx / beta, hy * sy / beta, dy / beta, 1., r56],
-                                 [0., 0., 0., 0., 0., 1.]])
+            u_matrix = torch.tensor([[cx, sx, 0., 0., 0., dx / beta],
+                                     [-kx2 * sx, cx, 0., 0., 0., sx * hx / beta],
+                                     [0., 0., cy, sy, 0., dy / beta],
+                                     [0., 0., -ky2 * sy, cy, 0., sy * hy / beta],
+                                     [hx * sx / beta, dx / beta, hy * sy / beta, dy / beta, 1., r56],
+                                     [0., 0., 0., 0., 0., 1.]], dtype=torch.float, device=device)
             if sum_tilts != 0:
-                u_matrix = np.dot(np.dot(rot_mtx(-sum_tilts), u_matrix), rot_mtx(sum_tilts))
+                u_matrix = torch.dot(torch.dot(rot_mtx(-sum_tilts), u_matrix), rot_mtx(sum_tilts))
             return u_matrix
 
         r_z_e = lambda z, energy: r_mtx(z, k1, hx=hx, hy=hy, sum_tilts=0, energy=energy)
